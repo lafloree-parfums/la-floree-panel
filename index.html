@@ -6,6 +6,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <title>La Florée Parfums · Panel de Gestión</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -544,11 +545,6 @@ tr.detail-row td{background:#FCF8F3;padding:0 14px 14px;}
 .prog-item{background:var(--st-encamino-bg);border:1px solid var(--st-encamino-border);}
 .prog-item.prog-vencido{background:var(--st-abonado-bg);border-color:var(--st-abonado-border);}
 .prog-badge{display:inline-block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;background:var(--danger);color:#fff;padding:1px 7px;border-radius:20px;margin-left:4px;}
-.cob-fechas-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
-.cob-fecha-chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;white-space:nowrap;}
-.cob-chip-pago{background:var(--st-entregado-bg);border:1px solid var(--st-entregado-border);color:var(--st-entregado-text);}
-.cob-chip-prog{background:var(--st-encamino-bg);border:1px solid var(--st-encamino-border);color:var(--st-encamino-text);}
-.cob-chip-venc{background:var(--st-abonado-bg);border:1px solid var(--st-abonado-border);color:var(--st-abonado-text);}
 
 /* ---------- filtro global de cliente ---------- */
 .cliente-filter-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px;}
@@ -636,8 +632,7 @@ input.dp-input{cursor:pointer;background:#fff;}
 .prefactura-totales div{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft);}
 .prefactura-totales .pt-saldo{border-top:1px solid var(--line);margin-top:4px;padding-top:8px;font-size:15px;font-weight:700;color:var(--ink);}
 .prefactura-foot{text-align:center;font-size:12.5px;color:var(--muted);margin-top:18px;padding-top:14px;border-top:1px dashed var(--line);}
-.prefactura-prog-wrap{background:var(--st-encamino-bg);border:1px solid var(--st-encamino-border);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
-.prefactura-pagos-wrap{background:var(--st-entregado-bg);border:1px solid var(--st-entregado-border);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
+.prefactura-prog-wrap{background:var(--st-encamino-bg);border:1px solid var(--st-encamino-border);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
 .prefactura-prog-item{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0;color:var(--ink-soft);}
 .prefactura-prog-item.prog-vencido{color:var(--danger);}
 .prefactura-prog-item b{color:var(--ink);}
@@ -1278,6 +1273,13 @@ try{
   }
 }catch(e){ console.error("No se pudo inicializar Firebase:", e); }
 
+function asegurarAutenticacion(){
+  if(!usaFirestore) return Promise.resolve();
+  return firebase.auth().signInAnonymously().catch(function(err){
+    console.error("No se pudo autenticar con Firebase (revisa que 'Anónimo' esté habilitado en Authentication):", err);
+  });
+}
+
 var TIERS_DEFAULT = {
   Essentiel: { desc: "Aromas versátiles para el día a día", Mujer:{p30:55000,p50:70000,p100:85000}, Hombre:{p30:55000,p50:68000,p100:82000}, Unisex:{p30:58000,p50:72000,p100:88000} },
   Maison:    { desc: "Fragancias elegantes para ocasiones especiales", Mujer:{p30:80000,p50:95000,p100:115000}, Hombre:{p30:78000,p50:92000,p100:110000}, Unisex:{p30:82000,p50:98000,p100:118000} },
@@ -1563,13 +1565,15 @@ function cargarDesdeObjeto(d){
 function loadState(){
   return new Promise(function(resolve){
     if(usaFirestore){
-      Promise.all([
-        db.collection("pedidos").get(),
-        db.collection("inventario").get(),
-        db.collection("usuarios").get(),
-        db.collection("meta").doc("catalogo").get(),
-        db.collection("meta").doc("config").get()
-      ]).then(function(r){
+      asegurarAutenticacion().then(function(){
+        return Promise.all([
+          db.collection("pedidos").get(),
+          db.collection("inventario").get(),
+          db.collection("usuarios").get(),
+          db.collection("meta").doc("catalogo").get(),
+          db.collection("meta").doc("config").get()
+        ]);
+      }).then(function(r){
         var pedidosSnap = r[0], invSnap = r[1], usuSnap = r[2], catDoc = r[3], cfgDoc = r[4];
         var esBaseVacia = pedidosSnap.empty && invSnap.empty && usuSnap.empty && !catDoc.exists;
         if(esBaseVacia){
@@ -2406,17 +2410,6 @@ function mensajePrefactura(m, subset){
   pedidosUsar.forEach(function(p){
     (p.programacionPagos||[]).forEach(function(pg){ progItems.push({fecha:pg.fecha, monto:pg.monto, nota:pg.nota, numero:numeroPedido(p)}); });
   });
-  var pagosTexto = "";
-  var pagosItems = [];
-  pedidosUsar.forEach(function(p){
-    (p.pagos||[]).forEach(function(pg){ pagosItems.push({fecha:pg.fecha, monto:pg.monto, nota:pg.nota||"", numero:numeroPedido(p)}); });
-  });
-  if(pagosItems.length){
-    pagosItems.sort(function(a,b){ return (a.fecha||"").localeCompare(b.fecha||""); });
-    pagosTexto = "\nPagos realizados:\n" + pagosItems.map(function(it){
-      return "• " + fmtDate(it.fecha) + " · " + it.numero + " — " + cop(it.monto) + (it.nota?" ("+it.nota+")":"");
-    }).join("\n") + "\n";
-  }
   var progTexto = "";
   if(progItems.length){
     progItems.sort(function(a,b){ return (a.fecha||"").localeCompare(b.fecha||""); });
@@ -2428,7 +2421,6 @@ function mensajePrefactura(m, subset){
     "Cliente: " + m.cliente + "\n" +
     "Fecha: " + fmtDate(todayISO()) + "\n\n" +
     "Pedidos:\n" + lineas + "\n" +
-    pagosTexto +
     progTexto + "\n" +
     "Total comprado: " + cop(totalComprado) + "\n" +
     "Total abonado: " + cop(totalPagado) + "\n" +
@@ -2443,21 +2435,6 @@ var prefacturaCliente = null;
 var prefacturaSeleccion = {};
 var prefacturaModo = "todos";
 var prefacturaPedidoUnicoId = null;
-
-function prefacturaPagosHTML(pedidos){
-  var items = [];
-  pedidos.forEach(function(p){
-    (p.pagos||[]).forEach(function(pg){
-      items.push({fecha:pg.fecha, monto:pg.monto, nota:pg.nota||"", numero:numeroPedido(p)});
-    });
-  });
-  if(!items.length) return "";
-  items.sort(function(a,b){ return (a.fecha||"").localeCompare(b.fecha||""); });
-  var filas = items.map(function(it){
-    return '<div class="prefactura-prog-item"><span>'+fmtDate(it.fecha)+' · '+it.numero+(it.nota?' — '+escapeHtml(it.nota):'')+'</span><b>'+cop(it.monto)+'</b></div>';
-  }).join("");
-  return '<div class="prefactura-pagos-wrap"><b style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:0.4px;color:var(--muted);margin-bottom:8px;">Pagos realizados</b>'+filas+'</div>';
-}
 
 function prefacturaProgramacionHTML(pedidos){
   var items = [];
@@ -2524,7 +2501,6 @@ function renderPrefacturaHTML(m, seleccionIds){
       (modo==="varios" ? '<th><input type="checkbox" class="pref-check" id="prefCheckAll"'+(todosMarcados?" checked":"")+'></th>' : '')+
       '<th>N°</th><th>Fecha</th><th>Perfume</th><th class="text-right">Cant.</th><th class="text-right">Total</th><th>Estado</th><th class="text-right">Saldo</th>'+
     '</tr></thead><tbody>'+filas+'</tbody></table></div>'+
-    prefacturaPagosHTML(visibles)+
     prefacturaProgramacionHTML(visibles)+
     '<div class="prefactura-totales">'+
       '<div><span>Total comprado</span><b>'+cop(totalComprado)+'</b></div>'+
@@ -2666,18 +2642,9 @@ function renderCobros(){
       '</div></td>'+
     '</tr>';
     if(open){
-      var hoy = todayISO();
       var detalle = m.pedidos.map(function(p){
         var c = calcPedido(p);
-        var ultPago = (p.pagos&&p.pagos.length) ? p.pagos.slice().sort(function(a,b){ return (b.fecha||"").localeCompare(a.fecha||""); })[0] : null;
-        var proxProg = (p.programacionPagos&&p.programacionPagos.length) ? p.programacionPagos.slice().filter(function(x){ return x.fecha>=hoy; }).sort(function(a,b){ return (a.fecha||"").localeCompare(b.fecha||""); })[0] : null;
-        var vencidoProg = (p.programacionPagos&&p.programacionPagos.length) ? p.programacionPagos.filter(function(x){ return x.fecha<hoy; }) : [];
-        var fechaInfo = "";
-        if(ultPago) fechaInfo += '<span class="cob-fecha-chip cob-chip-pago">✓ Pagó '+fmtDate(ultPago.fecha)+' · '+cop(ultPago.monto)+'</span>';
-        if(proxProg) fechaInfo += '<span class="cob-fecha-chip cob-chip-prog">⏰ '+fmtDate(proxProg.fecha)+' · '+cop(proxProg.monto)+'</span>';
-        if(!proxProg && vencidoProg.length) fechaInfo += '<span class="cob-fecha-chip cob-chip-venc">⚠ Fecha vencida</span>';
         return '<div class="detail-item"><div class="di-left"><span class="muted">'+numeroPedido(p)+'</span> · <b title="'+escapeHtml(tooltipPerfumesPedido(p))+'">'+escapeHtml(resumenPerfumesPedido(p))+'</b> · '+fmtDate(p.fecha)+
-          (fechaInfo ? '<div class="cob-fechas-row">'+fechaInfo+'</div>' : '') +
           (p.notas ? '<div class="di-notas">'+escapeHtml(p.notas)+'</div>' : '') + '</div>'+
           '<div>'+tagEstado(p.estado)+' &nbsp; '+(c.saldo>0? '<b style="color:var(--danger)">'+cop(c.saldo)+'</b>' : '<span class="muted">$0</span>')+'</div></div>';
       }).join("");
